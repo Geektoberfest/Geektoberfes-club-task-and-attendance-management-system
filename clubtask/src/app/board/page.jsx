@@ -220,10 +220,6 @@ export default function BoardPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl sm:text-3xl font-bold text-white">PROJECT_BOARD</h2>
-            <div className="text-xs text-gray-400 mt-1">
-              Viewing: <span className="text-white ml-1">{viewedMemberId || 'Your Board'}</span>
-              {viewedMemberId && loggedInMemberId && viewedMemberId !== loggedInMemberId && <span className="text-sm text-green-300 ml-2"> (member view)</span>}
-            </div>
           </div>
 
           <div className="flex items-center gap-3">

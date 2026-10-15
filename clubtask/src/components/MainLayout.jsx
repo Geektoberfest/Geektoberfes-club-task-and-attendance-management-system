@@ -3,7 +3,7 @@
 import Header from './Header'
 import Sidebar from './Sidebar'
 
-export default function MainLayout({ children, hudType }) {
+export default function MainLayout({ children }) {
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono">
       <Header />
