@@ -41,8 +41,9 @@ export default function EventsPage() {
   const [time, setTime] = useState('')
   const [venue, setVenue] = useState('')
   const [desc, setDesc] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
+  const [pendingDelete, setPendingDelete] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const loadEvents = useCallback(async () => {
     setLoading(true)
@@ -178,23 +179,44 @@ export default function EventsPage() {
     setOpenCreate(false)
   }
 
-  const deleteEvent = async (id) => {
+  const requestDelete = (ev) => {
     if (role !== 'lead') return
-    if (!confirm('Delete this event?')) return
+    setDeleteError('')
+    setPendingDelete({ id: ev.id, title: ev.title })
+  }
+
+  const cancelDelete = () => {
+    if (deleting) return
+    setPendingDelete(null)
+    setDeleteError('')
+  }
+
+  // the card is only removed after the server confirms the delete
+  const confirmDelete = async () => {
+    if (role !== 'lead' || !pendingDelete) return
+    const { id } = pendingDelete
+    setDeleting(true)
+    setDeleteError('')
 
     try {
-      const res = await authFetch(`/api/events/${id}`, { method: 'DELETE' })
+      const res = await authFetch(`/api/events?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       if (res && res.ok) {
         setEvents(prev => prev.filter(e => e.id !== id))
-        const copy = { ...attendanceState }
-        delete copy[id]
-        setAttendanceState(copy)
+        setAttendanceState(prev => {
+          const copy = { ...prev }
+          delete copy[id]
+          return copy
+        })
+        setPendingDelete(null)
         return
       }
+      setDeleteError('Could not delete this event. Please try again.')
     } catch (err) {
       console.warn('delete failed', err)
+      setDeleteError('Could not delete this event. Please try again.')
+    } finally {
+      setDeleting(false)
     }
-    setEvents(prev => prev.filter(e => e.id !== id))
   }
 
   const openAttendanceEditor = async (eventId) => {
@@ -295,7 +317,7 @@ export default function EventsPage() {
             <div key={ev.id} className={`${cardGreenClass} rounded-lg p-3 sm:p-4 hover:scale-105 relative border-2`}>
               {role === 'lead' && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteEvent(ev.id) }}
+                  onClick={(e) => { e.stopPropagation(); requestDelete(ev) }}
                   className="absolute top-0 right-2 text-xs text-red-400 hover:text-red-300"
                 >
                   x
@@ -389,6 +411,24 @@ export default function EventsPage() {
             <div className="text-sm text-gray-300 mb-2">Where: <span className="text-white">{openDescFor.location}</span></div>
             <div className="text-sm text-gray-300 mb-2">Description:</div>
             <div className="text-gray-300">{openDescFor.description}</div>
+          </div>
+        )}
+      </Overlay>
+
+      {/* DELETE CONFIRMATION */}
+      <Overlay open={!!pendingDelete} onClose={cancelDelete} title="Delete event?" width="w-full sm:max-w-md">
+        {pendingDelete && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-300">
+              This will permanently delete <span className="text-white font-semibold">{pendingDelete.title}</span>.
+            </p>
+            {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={cancelDelete} disabled={deleting} className="px-3 py-2 rounded bg-gray-700 disabled:opacity-50">Cancel</button>
+              <button onClick={confirmDelete} disabled={deleting} className="px-3 py-2 rounded bg-red-600 text-white disabled:opacity-50">
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </div>
         )}
       </Overlay>

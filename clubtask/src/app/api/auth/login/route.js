@@ -2,6 +2,7 @@ import dbConnect from '@/lib/mongodb'
 import User from '@/models/User'
 import bcrypt from 'bcryptjs'
 import { signToken } from '@/lib/auth'
+import { roleForPosition } from '@/lib/authz'
 
 export async function POST(req) {
   try {
@@ -39,7 +40,7 @@ export async function POST(req) {
       return new Response(JSON.stringify({ error: 'Invalid credentials' }), { status: 401 })
     }
 
-    const role = (user.position && user.position.toLowerCase().includes('lead')) ? 'lead' : 'member'
+    const role = roleForPosition(user.position)
     const token = signToken({ id: user._id, email: user.email, role })
 
     const userResp = {

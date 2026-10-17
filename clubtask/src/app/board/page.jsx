@@ -1,10 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import MainLayout from '@/components/MainLayout'
-import LoadError from '@/components/LoadError'
 import { authFetch } from '@/lib/ClientFetch'
-import { apiErrorMessage } from '@/lib/apiError'
 export default function BoardPage() {
   // UI state
   const [openOverlay, setOpenOverlay] = useState(false)
@@ -16,16 +14,35 @@ export default function BoardPage() {
 
   // data
   const [boardTasks, setBoardTasks] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
 
   // routing / who we view
   const [viewedMemberId, setViewedMemberId] = useState(null)
   const [loggedInMemberId, setLoggedInMemberId] = useState(null)
   const [role, setRole] = useState('member')
 
+  // club-wide task stats (lead only)
+  const [stats, setStats] = useState(null)
+  const [statsError, setStatsError] = useState('')
+
   // helpers
   const uid = (p = '') => p + Date.now().toString(36).slice(-6)
+
+  // a task is overdue when its due date (timeline) is before today and it is not completed
+  const isOverdue = (task) => {
+    if (task.columnId === 'done' || task.columnId === 'DEPLOYED') return false
+    if (!task.timeline) return false
+
+    // YYYY-MM-DD from the date input is parsed as local midnight, not UTC
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(task.timeline)
+    const due = match
+      ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+      : new Date(task.timeline)
+    if (isNaN(due.getTime())) return false
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return due < startOfToday
+  }
 
   // column color helpers
   const borderForColumn = (col) => {
@@ -70,43 +87,86 @@ export default function BoardPage() {
     }
   }, [])
 
-  const loadTasks = useCallback(async () => {
-    const memberId = viewedMemberId || loggedInMemberId
-    setLoading(true)
-    setLoadError('')
-    let failure = ''
-
-    try {
-      if (memberId) {
-        const res = await authFetch(`/api/tasks?assignee=${encodeURIComponent(memberId)}`)
-        if (res && res.ok && Array.isArray(res.data)) {
-          setBoardTasks(res.data)
-          return
-        }
-        failure = apiErrorMessage(res)
+  useEffect(() => {
+    if (role !== 'lead') return
+    let mounted = true
+    ;(async () => {
+      try {
+        const res = await authFetch('/api/tasks/stats')
+        if (!mounted) return
+        if (res.ok) setStats(res.data)
+        else setStatsError(res.data?.error || 'Could not load task statistics')
+      } catch (e) {
+        console.warn('task stats fetch failed', e)
+        if (mounted) setStatsError('Could not load task statistics')
       }
-    } catch (e) {
-      console.warn('load tasks failed', e)
-      failure = apiErrorMessage(null)
-    } finally {
-      setLoadError(failure)
-      setLoading(false)
-    }
+    })()
 
-    // show tasks saved in this browser so the board is not blank while the error is displayed
-    try {
-      const raw = localStorage.getItem('boardTasks')
-      const arr = raw ? JSON.parse(raw) : []
-      setBoardTasks(memberId ? arr.filter(t => t.assignee === memberId) : arr)
-    } catch (e) {
-      console.warn('localStorage fallback failed', e)
-      setBoardTasks([])
-    }
-  }, [viewedMemberId, loggedInMemberId])
+    return () => { mounted = false }
+  }, [role])
 
   useEffect(() => {
-    loadTasks()
-  }, [loadTasks])
+    let mounted = true
+    ;(async () => {
+      try {
+        if (viewedMemberId) {
+          try {
+            const res = await authFetch(`/api/tasks?assignee=${encodeURIComponent(viewedMemberId)}`)
+            if (mounted && res && res.ok && Array.isArray(res.data)) {
+              setBoardTasks(res.data)
+              return
+            }
+          } catch (e) {
+            console.warn('tasks fetch by assignee failed', e)
+          }
+
+          try {
+            const raw = localStorage.getItem('boardTasks')
+            const arr = raw ? JSON.parse(raw) : []
+            const filtered = arr.filter(t => t.assignee === viewedMemberId)
+            if (mounted) setBoardTasks(filtered)
+            return
+          } catch (e) {
+            console.warn('localStorage fallback (assignee) failed', e)
+          }
+        }
+        if (loggedInMemberId) {
+          try {
+            const res = await authFetch(`/api/tasks?assignee=${encodeURIComponent(loggedInMemberId)}`)
+            if (mounted && res && res.ok && Array.isArray(res.data)) {
+              setBoardTasks(res.data)
+              return
+            }
+          } catch (e) {
+            console.warn('tasks fetch for logged user failed', e)
+          }
+
+          // fallback to localStorage filtered by loggedInMemberId
+          try {
+            const raw = localStorage.getItem('boardTasks')
+            const arr = raw ? JSON.parse(raw) : []
+            const filtered = arr.filter(t => t.assignee === loggedInMemberId)
+            if (mounted) setBoardTasks(filtered)
+            return
+          } catch (e) {
+            console.warn('localStorage fallback (logged) failed', e)
+          }
+        }
+
+        try {
+          const raw = localStorage.getItem('boardTasks'); const arr = raw ? JSON.parse(raw) : []
+          if (mounted) setBoardTasks(arr)
+        } catch (e) {
+          console.warn('final localStorage fallback failed', e); if (mounted) setBoardTasks([])
+        }
+      } catch (err) {
+        console.warn('load tasks error', err)
+        if (mounted) setBoardTasks([])
+      }
+    })()
+
+    return () => { mounted = false }
+  }, [viewedMemberId, loggedInMemberId])
 
   // helpers to derive columns
   const backlog = boardTasks.filter(t => (t.columnId === 'backlog' || t.columnId === 'INITIALIZE' ))
@@ -149,7 +209,7 @@ export default function BoardPage() {
 
     const newTask = {
       title: taskTitle.trim(),
-      timeline: taskDate || new Date().toLocaleDateString(),
+      timeline: taskDate || '',
       columnId: taskColumn,
       assignee,
       createdAt: new Date().toISOString()
@@ -206,8 +266,21 @@ export default function BoardPage() {
           </div>
         </div>
 
-        {loadError && <LoadError message={loadError} onRetry={loadTasks} />}
-        {loading && <p className="text-sm text-gray-400 mb-4">Loading tasks...</p>}
+        {role === 'lead' && (
+          <div className="mb-6 border border-green-900/50 rounded-lg p-4 bg-gray-900/30">
+            <h3 className="text-white font-bold mb-3">CLUB_TASK_SUMMARY</h3>
+            {statsError && <div className="text-red-400 text-sm">{statsError}</div>}
+            {!statsError && !stats && <div className="text-gray-400 text-sm">Loading...</div>}
+            {stats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><p className="text-red-400 text-2xl font-bold">{stats.pending}</p><p className="text-sm text-gray-300">Pending</p></div>
+                <div><p className="text-blue-400 text-2xl font-bold">{stats.inProgress}</p><p className="text-sm text-gray-300">In Progress</p></div>
+                <div><p className="text-green-400 text-2xl font-bold">{stats.completed}</p><p className="text-sm text-gray-300">Completed</p></div>
+                <div><p className="text-white text-2xl font-bold">{stats.total}</p><p className="text-sm text-gray-300">Total</p></div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
           {/* Backlog */}
@@ -221,6 +294,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('backlog')} ${bgForColumn('backlog')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {backlog.length === 0 && <div className="text-gray-400">No tasks</div>}
@@ -238,6 +312,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('inprogress')} ${bgForColumn('inprogress')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {inprogress.length === 0 && <div className="text-gray-400">No tasks</div>}
@@ -255,6 +330,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('done')} ${bgForColumn('done')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {done.length === 0 && <div className="text-gray-400">No tasks</div>}
