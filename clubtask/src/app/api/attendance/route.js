@@ -1,6 +1,7 @@
 import dbConnect from '@/lib/mongodb'
 import Attendance from '@/models/Attendance'
 import { requireUser, requireLead, jsonError, canAccessMember } from '@/lib/authz'
+import { recordAudit } from '@/lib/audit'
 import mongoose from 'mongoose'
 
 // members only see their own attendance rows; leads see every row
@@ -28,6 +29,7 @@ export async function POST(req) {
           { upsert: true, new: true, setDefaultsOnInsert: true }
         )
         results.push(rec)
+        await recordAudit(user, { action: 'attendance.mark', resourceType: 'attendance', resourceId: rec._id, details: { eventId, memberId: mId, status: s } })
       }
       return new Response(JSON.stringify(results), { status: 200 })
     }
@@ -39,6 +41,7 @@ export async function POST(req) {
       { status: status || 'present', markedBy: user.id },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
+    await recordAudit(user, { action: 'attendance.mark', resourceType: 'attendance', resourceId: rec._id, details: { eventId, memberId, status: status || 'present' } })
     return new Response(JSON.stringify(rec), { status: 200 })
   } catch (err) {
     console.error(err)

@@ -1,6 +1,7 @@
 import dbConnect from '@/lib/mongodb'
 import Task from '@/models/Task'
 import { requireUser, jsonError, canAccessMember } from '@/lib/authz'
+import { recordAudit } from '@/lib/audit'
 
 export async function GET(req) {
   try {
@@ -42,6 +43,7 @@ export async function POST(req) {
       createdAt: new Date()
     })
     await task.save()
+    await recordAudit(user, { action: 'task.create', resourceType: 'task', resourceId: task._id, details: { title: task.title, columnId: task.columnId, assignee: String(task.assignee) } })
     return new Response(JSON.stringify({ ok: true, task }), { status: 201 })
   } catch (e) {
     console.error(e)

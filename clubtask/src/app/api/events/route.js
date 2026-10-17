@@ -1,6 +1,7 @@
 import dbConnect from '@/lib/mongodb'
 import Event from '@/models/Event'
 import { requireUser, requireLead } from '@/lib/authz'
+import { recordAudit } from '@/lib/audit'
 
 export async function GET(req) {
   try {
@@ -25,6 +26,7 @@ export async function POST(req) {
     const data = await req.json()
     const ev = new Event({ ...data, createdBy: user.id })
     await ev.save()
+    await recordAudit(user, { action: 'event.create', resourceType: 'event', resourceId: ev._id, details: { title: ev.title, date: ev.date } })
     return new Response(JSON.stringify(ev), { status: 201 })
   } catch (err) {
     console.error(err)
@@ -34,7 +36,7 @@ export async function POST(req) {
 
 export async function DELETE(req) {
   try {
-    const { response } = requireLead(req, 'Only lead can delete events')
+    const { user, response } = requireLead(req, 'Only lead can delete events')
     if (response) return response
 
     const url = new URL(req.url)
@@ -42,7 +44,8 @@ export async function DELETE(req) {
     if (!id) return new Response(JSON.stringify({ error: 'Missing id' }), { status: 400 })
 
     await dbConnect()
-    await Event.findByIdAndDelete(id)
+    const deleted = await Event.findByIdAndDelete(id)
+    if (deleted) await recordAudit(user, { action: 'event.delete', resourceType: 'event', resourceId: id, details: { title: deleted.title, date: deleted.date } })
     return new Response(JSON.stringify({ success: true }), { status: 200 })
   } catch (err) {
     console.error(err)
