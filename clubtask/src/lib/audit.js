@@ -16,18 +16,19 @@ export function sanitizeDetails(value, depth = 0) {
 }
 
 // `actor` must be the verified token payload from requireUser/requireLead, never a request field.
-// A failed audit write is logged but does not undo or fail the action it describes.
+// Call this BEFORE the change it describes. If it throws, the caller must not make the change.
 export async function recordAudit(actor, { action, resourceType, resourceId = '', details = {} }) {
-  try {
-    await AuditLog.create({
-      actor: actor.id,
-      actorRole: actor.role,
-      action,
-      resourceType,
-      resourceId: String(resourceId || ''),
-      details: sanitizeDetails(details)
-    })
-  } catch (err) {
-    console.error('[AUDIT] failed to record', action, err)
-  }
+  await AuditLog.create({
+    actor: actor.id,
+    actorRole: actor.role,
+    action,
+    resourceType,
+    resourceId: String(resourceId || ''),
+    details: sanitizeDetails(details)
+  })
+}
+
+// Response sent when the audit write fails. The change was not made.
+export function auditUnavailable() {
+  return new Response(JSON.stringify({ error: 'Audit log unavailable. The change was not saved, please retry.' }), { status: 503 })
 }

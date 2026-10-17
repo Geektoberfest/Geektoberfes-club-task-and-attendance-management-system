@@ -3,6 +3,7 @@ import User from '@/models/User'
 import bcrypt from 'bcryptjs'
 import { signToken } from '@/lib/auth'
 import { roleForPosition } from '@/lib/authz'
+import { recordAudit, auditUnavailable } from '@/lib/audit'
 
 export async function POST(req) {
   try {
@@ -41,6 +42,14 @@ export async function POST(req) {
     }
 
     const role = roleForPosition(user.position)
+
+    try {
+      await recordAudit({ id: user._id, role }, { action: 'user.login', resourceType: 'user', resourceId: user._id, details: { position: user.position } })
+    } catch (err) {
+      console.error('[AUDIT] user.login not recorded', err)
+      return auditUnavailable()
+    }
+
     const token = signToken({ id: user._id, email: user.email, role })
 
     const userResp = {

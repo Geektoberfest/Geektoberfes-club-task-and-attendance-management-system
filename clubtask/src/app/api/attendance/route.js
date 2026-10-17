@@ -1,7 +1,7 @@
 import dbConnect from '@/lib/mongodb'
 import Attendance from '@/models/Attendance'
 import { requireUser, requireLead, jsonError, canAccessMember } from '@/lib/authz'
-import { recordAudit } from '@/lib/audit'
+import { recordAudit, auditUnavailable } from '@/lib/audit'
 import mongoose from 'mongoose'
 
 // members only see their own attendance rows; leads see every row
@@ -23,25 +23,36 @@ export async function POST(req) {
       const results = []
       for (const [mId, s] of Object.entries(attendance)) {
         if (!mongoose.Types.ObjectId.isValid(mId)) continue
+        try {
+          await recordAudit(user, { action: 'attendance.mark', resourceType: 'attendance', resourceId: `${eventId}:${mId}`, details: { eventId, memberId: mId, status: s } })
+        } catch (err) {
+          console.error('[AUDIT] attendance.mark not recorded', err)
+          return auditUnavailable()
+        }
         const rec = await Attendance.findOneAndUpdate(
           { event: eventId, member: mId },
           { status: s, markedBy: user.id },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         )
         results.push(rec)
-        await recordAudit(user, { action: 'attendance.mark', resourceType: 'attendance', resourceId: rec._id, details: { eventId, memberId: mId, status: s } })
       }
       return new Response(JSON.stringify(results), { status: 200 })
     }
 
     if (!eventId || !memberId) return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 })
 
+    try {
+      await recordAudit(user, { action: 'attendance.mark', resourceType: 'attendance', resourceId: `${eventId}:${memberId}`, details: { eventId, memberId, status: status || 'present' } })
+    } catch (err) {
+      console.error('[AUDIT] attendance.mark not recorded', err)
+      return auditUnavailable()
+    }
+
     const rec = await Attendance.findOneAndUpdate(
       { event: eventId, member: memberId },
       { status: status || 'present', markedBy: user.id },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
-    await recordAudit(user, { action: 'attendance.mark', resourceType: 'attendance', resourceId: rec._id, details: { eventId, memberId, status: status || 'present' } })
     return new Response(JSON.stringify(rec), { status: 200 })
   } catch (err) {
     console.error(err)
