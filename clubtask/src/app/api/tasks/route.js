@@ -30,6 +30,7 @@ export async function POST(req) {
       title: body.title,
       timeline: body.timeline,
       columnId: body.columnId || 'backlog',
+      priority: ['low', 'medium', 'high'].includes(body.priority) ? body.priority : 'medium',
       assignee: body.assignee || user.id,
       createdAt: new Date()
     })
