@@ -1,8 +1,14 @@
 import dbConnect from '@/lib/mongodb'
 import User from '@/models/User'
+import { requireUser } from '@/lib/authz'
+
+export const dynamic = 'force-dynamic'
 
 export async function GET(req) {
   try {
+    const { response } = requireUser(req)
+    if (response) return response
+
     await dbConnect()
     const url = new URL(req.url)
     const domain = url.searchParams.get('domain')

@@ -1,14 +1,21 @@
 import dbConnect from '@/lib/mongodb'
 import Task from '@/models/Task'
-import { verifyToken } from '@/lib/auth'
+import { requireUser, jsonError, canAccessMember } from '@/lib/authz'
 
 export async function GET(req) {
   try {
-    await dbConnect()
+    const { user, response } = requireUser(req)
+    if (response) return response
+
     const url = new URL(req.url)
     const assignee = url.searchParams.get('assignee')
+    if (assignee && !canAccessMember(user, assignee)) return jsonError('You can only view your own tasks', 403)
+
+    await dbConnect()
+    // leads see every task; members only ever see their own
     let query = {}
-    if (assignee) query.assignee = assignee
+    if (user.role !== 'lead') query.assignee = user.id
+    else if (assignee) query.assignee = assignee
     const tasks = await Task.find(query).sort({ createdAt: -1 }).lean()
     return new Response(JSON.stringify(tasks), { status: 200 })
   } catch (e) {
@@ -19,18 +26,19 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
-    await dbConnect()
-    const bearer = req.headers.get('authorization') || ''
-    const token = bearer.split(' ')[1]
-    const user = verifyToken(token)
-    if (!user) return new Response(JSON.stringify({ error: 'Not authorized' }), { status: 401 })
+    const { user, response } = requireUser(req)
+    if (response) return response
 
     const body = await req.json()
+    const assignee = body.assignee || user.id
+    if (!canAccessMember(user, assignee)) return jsonError('You can only create tasks for yourself', 403)
+
+    await dbConnect()
     const task = new Task({
       title: body.title,
       timeline: body.timeline,
       columnId: body.columnId || 'backlog',
-      assignee: body.assignee || user.id,
+      assignee,
       createdAt: new Date()
     })
     await task.save()
