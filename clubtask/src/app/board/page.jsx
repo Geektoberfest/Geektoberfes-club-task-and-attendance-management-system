@@ -20,6 +20,10 @@ export default function BoardPage() {
   const [loggedInMemberId, setLoggedInMemberId] = useState(null)
   const [role, setRole] = useState('member')
 
+  // club-wide task stats (lead only)
+  const [stats, setStats] = useState(null)
+  const [statsError, setStatsError] = useState('')
+
   // helpers
   const uid = (p = '') => p + Date.now().toString(36).slice(-6)
 
@@ -82,6 +86,24 @@ export default function BoardPage() {
       else setViewedMemberId(null)
     }
   }, [])
+
+  useEffect(() => {
+    if (role !== 'lead') return
+    let mounted = true
+    ;(async () => {
+      try {
+        const res = await authFetch('/api/tasks/stats')
+        if (!mounted) return
+        if (res.ok) setStats(res.data)
+        else setStatsError(res.data?.error || 'Could not load task statistics')
+      } catch (e) {
+        console.warn('task stats fetch failed', e)
+        if (mounted) setStatsError('Could not load task statistics')
+      }
+    })()
+
+    return () => { mounted = false }
+  }, [role])
 
   useEffect(() => {
     let mounted = true
@@ -243,6 +265,22 @@ export default function BoardPage() {
             <button onClick={() => setOpenOverlay(true)} className="bg-green-500 hover:bg-green-600 text-black font-bold py-2 px-3 sm:px-4 rounded transition-all">[ + EXECUTE NEW TASK ]</button>
           </div>
         </div>
+
+        {role === 'lead' && (
+          <div className="mb-6 border border-green-900/50 rounded-lg p-4 bg-gray-900/30">
+            <h3 className="text-white font-bold mb-3">CLUB_TASK_SUMMARY</h3>
+            {statsError && <div className="text-red-400 text-sm">{statsError}</div>}
+            {!statsError && !stats && <div className="text-gray-400 text-sm">Loading...</div>}
+            {stats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><p className="text-red-400 text-2xl font-bold">{stats.pending}</p><p className="text-sm text-gray-300">Pending</p></div>
+                <div><p className="text-blue-400 text-2xl font-bold">{stats.inProgress}</p><p className="text-sm text-gray-300">In Progress</p></div>
+                <div><p className="text-green-400 text-2xl font-bold">{stats.completed}</p><p className="text-sm text-gray-300">Completed</p></div>
+                <div><p className="text-white text-2xl font-bold">{stats.total}</p><p className="text-sm text-gray-300">Total</p></div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
           {/* Backlog */}
