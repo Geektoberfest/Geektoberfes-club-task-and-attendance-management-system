@@ -11,20 +11,18 @@ export default function BoardPage() {
   const [taskTitle, setTaskTitle] = useState('')
   const [taskDate, setTaskDate] = useState('')
   const [taskColumn, setTaskColumn] = useState('backlog')
-  const [taskPriority, setTaskPriority] = useState('medium')
 
   // data
   const [boardTasks, setBoardTasks] = useState([])
-
-  // search and filters
-  const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [priorityFilter, setPriorityFilter] = useState('all')
 
   // routing / who we view
   const [viewedMemberId, setViewedMemberId] = useState(null)
   const [loggedInMemberId, setLoggedInMemberId] = useState(null)
   const [role, setRole] = useState('member')
+
+  // club-wide task stats (lead only)
+  const [stats, setStats] = useState(null)
+  const [statsError, setStatsError] = useState('')
 
   // helpers
   const uid = (p = '') => p + Date.now().toString(36).slice(-6)
@@ -90,6 +88,24 @@ export default function BoardPage() {
   }, [])
 
   useEffect(() => {
+    if (role !== 'lead') return
+    let mounted = true
+    ;(async () => {
+      try {
+        const res = await authFetch('/api/tasks/stats')
+        if (!mounted) return
+        if (res.ok) setStats(res.data)
+        else setStatsError(res.data?.error || 'Could not load task statistics')
+      } catch (e) {
+        console.warn('task stats fetch failed', e)
+        if (mounted) setStatsError('Could not load task statistics')
+      }
+    })()
+
+    return () => { mounted = false }
+  }, [role])
+
+  useEffect(() => {
     let mounted = true
     ;(async () => {
       try {
@@ -152,32 +168,10 @@ export default function BoardPage() {
     return () => { mounted = false }
   }, [viewedMemberId, loggedInMemberId])
 
-  // tasks saved before priority existed have no priority, so treat them as medium
-  const priorityOf = (t) => t.priority || 'medium'
-
-  const hasActiveFilters = searchQuery.trim() !== '' || statusFilter !== 'all' || priorityFilter !== 'all'
-
-  const clearFilters = () => {
-    setSearchQuery('')
-    setStatusFilter('all')
-    setPriorityFilter('all')
-  }
-
-  // search and filters combine: a task must match all of them to be shown
-  const filteredTasks = boardTasks.filter(t => {
-    const query = searchQuery.trim().toLowerCase()
-    if (query && !t.title.toLowerCase().includes(query)) return false
-    if (priorityFilter !== 'all' && priorityOf(t) !== priorityFilter) return false
-    if (statusFilter === 'backlog' && !(t.columnId === 'backlog' || t.columnId === 'INITIALIZE')) return false
-    if (statusFilter === 'inprogress' && !(t.columnId === 'inprogress' || t.columnId === 'RUNNING PROCESSES')) return false
-    if (statusFilter === 'done' && !(t.columnId === 'done' || t.columnId === 'DEPLOYED')) return false
-    return true
-  })
-
   // helpers to derive columns
-  const backlog = filteredTasks.filter(t => (t.columnId === 'backlog' || t.columnId === 'INITIALIZE' ))
-  const inprogress = filteredTasks.filter(t => (t.columnId === 'inprogress' || t.columnId === 'RUNNING PROCESSES'))
-  const done = filteredTasks.filter(t => (t.columnId === 'done' || t.columnId === 'DEPLOYED'))
+  const backlog = boardTasks.filter(t => (t.columnId === 'backlog' || t.columnId === 'INITIALIZE' ))
+  const inprogress = boardTasks.filter(t => (t.columnId === 'inprogress' || t.columnId === 'RUNNING PROCESSES'))
+  const done = boardTasks.filter(t => (t.columnId === 'done' || t.columnId === 'DEPLOYED'))
 
   const persistNewTask = async (taskObj) => {
     try {
@@ -217,13 +211,12 @@ export default function BoardPage() {
       title: taskTitle.trim(),
       timeline: taskDate || '',
       columnId: taskColumn,
-      priority: taskPriority,
       assignee,
       createdAt: new Date().toISOString()
     }
 
     persistNewTask(newTask)
-    setTaskTitle(''); setTaskDate(''); setTaskColumn('backlog'); setTaskPriority('medium'); setOpenOverlay(false)
+    setTaskTitle(''); setTaskDate(''); setTaskColumn('backlog'); setOpenOverlay(false)
   }
 
   return (
@@ -252,13 +245,6 @@ export default function BoardPage() {
               <option value="done">Done</option>
             </select>
 
-            <label className="block text-sm text-gray-300 mb-2">Priority</label>
-            <select value={taskPriority} onChange={(e) => setTaskPriority(e.target.value)} className="w-full mb-3 px-3 py-2 rounded bg-gray-800 border border-green-700 text-white">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-
             <div className="text-xs text-gray-400 mb-2">
               Assigning to: <span className="text-white ml-1">{viewedMemberId || loggedInMemberId || 'unassigned'}</span>
             </div>
@@ -280,29 +266,20 @@ export default function BoardPage() {
           </div>
         </div>
 
-        {/* Search and filters */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
-          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} type="text" placeholder="Search task titles"
-            className="flex-1 px-3 py-2 rounded bg-gray-800 border border-green-700 text-white" />
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 rounded bg-gray-800 border border-green-700 text-white">
-            <option value="all">All statuses</option>
-            <option value="backlog">Backlog</option>
-            <option value="inprogress">In Progress</option>
-            <option value="done">Done</option>
-          </select>
-          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="px-3 py-2 rounded bg-gray-800 border border-green-700 text-white">
-            <option value="all">All priorities</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-          {hasActiveFilters && (
-            <button onClick={clearFilters} className="px-3 py-2 rounded bg-gray-800 hover:bg-gray-700 text-white border border-green-700">Clear filters</button>
-          )}
-        </div>
-
-        {boardTasks.length > 0 && filteredTasks.length === 0 && (
-          <div className="text-gray-400 mb-6">No tasks match your search or filters.</div>
+        {role === 'lead' && (
+          <div className="mb-6 border border-green-900/50 rounded-lg p-4 bg-gray-900/30">
+            <h3 className="text-white font-bold mb-3">CLUB_TASK_SUMMARY</h3>
+            {statsError && <div className="text-red-400 text-sm">{statsError}</div>}
+            {!statsError && !stats && <div className="text-gray-400 text-sm">Loading...</div>}
+            {stats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><p className="text-red-400 text-2xl font-bold">{stats.pending}</p><p className="text-sm text-gray-300">Pending</p></div>
+                <div><p className="text-blue-400 text-2xl font-bold">{stats.inProgress}</p><p className="text-sm text-gray-300">In Progress</p></div>
+                <div><p className="text-green-400 text-2xl font-bold">{stats.completed}</p><p className="text-sm text-gray-300">Completed</p></div>
+                <div><p className="text-white text-2xl font-bold">{stats.total}</p><p className="text-sm text-gray-300">Total</p></div>
+              </div>
+            )}
+          </div>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
@@ -317,8 +294,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('backlog')} ${bgForColumn('backlog')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
-                  <span className="ml-2 text-yellow-400 text-xs uppercase">{priorityOf(task)}</span>
-                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {backlog.length === 0 && <div className="text-gray-400">No tasks</div>}
@@ -336,8 +312,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('inprogress')} ${bgForColumn('inprogress')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
-                  <span className="ml-2 text-yellow-400 text-xs uppercase">{priorityOf(task)}</span>
-                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {inprogress.length === 0 && <div className="text-gray-400">No tasks</div>}
@@ -355,8 +330,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('done')} ${bgForColumn('done')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
-                  <span className="ml-2 text-yellow-400 text-xs uppercase">{priorityOf(task)}</span>
-                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {done.length === 0 && <div className="text-gray-400">No tasks</div>}

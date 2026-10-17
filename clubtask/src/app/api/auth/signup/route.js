@@ -2,11 +2,11 @@ import dbConnect from '@/lib/mongodb'
 import User from '@/models/User'
 import bcrypt from 'bcryptjs'
 import { signToken } from '@/lib/auth'
+import { isLeadPosition, roleForPosition, jsonError } from '@/lib/authz'
 
 export async function POST(req) {
   try {
     console.log('[SIGNUP] request at', new Date().toISOString())
-    await dbConnect()
     const body = await req.json().catch(e => {
       console.error('[SIGNUP] failed to parse JSON body', e)
       return null
@@ -24,6 +24,11 @@ export async function POST(req) {
       return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 })
     }
 
+    // lead status is granted by an existing lead, never chosen at signup
+    if (isLeadPosition(position)) return jsonError('Lead positions cannot be selected at signup', 403)
+
+    await dbConnect()
+
     // check existing
     const existing = await User.findOne({ email })
     if (existing) {
@@ -37,7 +42,7 @@ export async function POST(req) {
     const user = new User({ name, email, passwordHash, position, domain, memberSince: new Date().getFullYear() })
     await user.save()
 
-    const role = (user.position && user.position.toLowerCase().includes('lead')) ? 'lead' : 'member'
+    const role = roleForPosition(user.position)
     const token = signToken({ id: user._id, email: user.email, role })
 
     const userResp = { id: user._id, name: user.name, email: user.email, position: user.position, domain: user.domain }
@@ -45,7 +50,7 @@ export async function POST(req) {
     return new Response(JSON.stringify({ user: userResp, token }), { status: 201 })
   } catch (err) {
     console.error('[SIGNUP] unexpected error', err && err.stack ? err.stack : err)
-    
+
     if (err && err.code === 11000) {
       return new Response(JSON.stringify({ error: 'Duplicate key error' }), { status: 409 })
     }
