@@ -1,6 +1,8 @@
 import dbConnect from '@/lib/mongodb'
 import Task from '@/models/Task'
 import { requireUser, jsonError, canAccessMember } from '@/lib/authz'
+import { recordAudit, auditUnavailable } from '@/lib/audit'
+import mongoose from 'mongoose'
 
 export async function GET(req) {
   try {
@@ -35,12 +37,21 @@ export async function POST(req) {
 
     await dbConnect()
     const task = new Task({
+      _id: new mongoose.Types.ObjectId(),
       title: body.title,
       timeline: body.timeline,
       columnId: body.columnId || 'backlog',
       assignee,
       createdAt: new Date()
     })
+
+    try {
+      await recordAudit(user, { action: 'task.create', resourceType: 'task', resourceId: task._id, details: { title: task.title, columnId: task.columnId, assignee: String(task.assignee) } })
+    } catch (err) {
+      console.error('[AUDIT] task.create not recorded', err)
+      return auditUnavailable()
+    }
+
     await task.save()
     return new Response(JSON.stringify({ ok: true, task }), { status: 201 })
   } catch (e) {

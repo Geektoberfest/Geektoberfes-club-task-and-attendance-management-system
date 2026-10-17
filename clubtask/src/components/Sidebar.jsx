@@ -28,6 +28,7 @@ export default function Sidebar() {
   const finalNav = [...navItems]
   if (role === 'lead') {
     finalNav.splice(1, 0, { href: '/domains', icon: Folder, label: 'DOMAINS' })
+    finalNav.push({ href: '/audit', icon: Settings, label: 'AUDIT_LOG' })
   }
 
   return (

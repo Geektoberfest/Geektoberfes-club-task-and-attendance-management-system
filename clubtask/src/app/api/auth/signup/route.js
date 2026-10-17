@@ -3,6 +3,8 @@ import User from '@/models/User'
 import bcrypt from 'bcryptjs'
 import { signToken } from '@/lib/auth'
 import { isLeadPosition, roleForPosition, jsonError } from '@/lib/authz'
+import { recordAudit, auditUnavailable } from '@/lib/audit'
+import mongoose from 'mongoose'
 
 export async function POST(req) {
   try {
@@ -39,10 +41,18 @@ export async function POST(req) {
     const salt = await bcrypt.genSalt(10)
     const passwordHash = await bcrypt.hash(password, salt)
 
-    const user = new User({ name, email, passwordHash, position, domain, memberSince: new Date().getFullYear() })
+    const user = new User({ _id: new mongoose.Types.ObjectId(), name, email, passwordHash, position, domain, memberSince: new Date().getFullYear() })
+    const role = roleForPosition(user.position)
+
+    try {
+      await recordAudit({ id: user._id, role }, { action: 'user.signup', resourceType: 'user', resourceId: user._id, details: { position, domain } })
+    } catch (err) {
+      console.error('[AUDIT] user.signup not recorded', err)
+      return auditUnavailable()
+    }
+
     await user.save()
 
-    const role = roleForPosition(user.position)
     const token = signToken({ id: user._id, email: user.email, role })
 
     const userResp = { id: user._id, name: user.name, email: user.email, position: user.position, domain: user.domain }
