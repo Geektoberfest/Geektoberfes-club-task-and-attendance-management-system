@@ -1,14 +1,18 @@
 'use client'
 
 import MainLayout from '@/components/MainLayout'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DOMAINS } from '@/data/domains'
 import { authFetch } from '@/lib/ClientFetch'
+import { apiErrorMessage } from '@/lib/apiError'
+import LoadError from '@/components/LoadError'
 
 export default function DomainsPage() {
   const [expandedDomainId, setExpandedDomainId] = useState(null)
   const [domainMembersMap, setDomainMembersMap] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const router = useRouter()
 
   const toggleDomain = (domainId) => {
@@ -20,40 +24,49 @@ export default function DomainsPage() {
     router.push(url)
   }
 
-  useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        const res = await authFetch('/api/members')
-        if (res && res.ok && Array.isArray(res.data)) {
-          const map = {}
-          res.data.forEach(u => {
-            const domainKey = u.domain || (u.domainName) || 'Unknown'
-            const item = { id: String(u._id || u.id || u._uid || u.uuid || ''), name: u.name || u.username || u.email || 'Unknown', domain: domainKey, email: u.email || '' }
-            if (!map[domainKey]) map[domainKey] = []
-            map[domainKey].push(item)
-          })
-          if (mounted) setDomainMembersMap(map)
-          return
-        }
-      } catch (e) {
-        console.warn('fetch /api/members failed, falling back to DOMAINS', e)
+  const loadMembers = useCallback(async () => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      const res = await authFetch('/api/members')
+      if (res && res.ok && Array.isArray(res.data)) {
+        const map = {}
+        res.data.forEach(u => {
+          const domainKey = u.domain || (u.domainName) || 'Unknown'
+          const item = { id: String(u._id || u.id || u._uid || u.uuid || ''), name: u.name || u.username || u.email || 'Unknown', domain: domainKey, email: u.email || '' }
+          if (!map[domainKey]) map[domainKey] = []
+          map[domainKey].push(item)
+        })
+        setDomainMembersMap(map)
+        return
       }
+      setLoadError(apiErrorMessage(res))
+    } catch (e) {
+      console.warn('fetch /api/members failed, falling back to DOMAINS', e)
+      setLoadError(apiErrorMessage(null))
+    } finally {
+      setLoading(false)
+    }
 
-      const fallback = {}
-      DOMAINS.forEach(d => {
-        fallback[d.name] = d.members.map(m => ({ id: m.id, name: m.name, domain: d.name }))
-      })
-      if (mounted) setDomainMembersMap(fallback)
-    })()
-
-    return () => { mounted = false }
+    // static domain data keeps the page usable while the error is shown
+    const fallback = {}
+    DOMAINS.forEach(d => {
+      fallback[d.name] = d.members.map(m => ({ id: m.id, name: m.name, domain: d.name }))
+    })
+    setDomainMembersMap(fallback)
   }, [])
+
+  useEffect(() => {
+    loadMembers()
+  }, [loadMembers])
 
   return (
     <MainLayout>
       <div className="p-6 max-w-8xl mx-auto">
         <h1 className="text-2xl font-bold text-white mb-6">Domains</h1>
+
+        {loadError && <LoadError message={loadError} onRetry={loadMembers} />}
+        {loading && <p className="text-sm text-gray-400 mb-4">Loading members...</p>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {DOMAINS.map((domain) => (
