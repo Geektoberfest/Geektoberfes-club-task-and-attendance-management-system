@@ -23,6 +23,23 @@ export default function BoardPage() {
   // helpers
   const uid = (p = '') => p + Date.now().toString(36).slice(-6)
 
+  // a task is overdue when its due date (timeline) is before today and it is not completed
+  const isOverdue = (task) => {
+    if (task.columnId === 'done' || task.columnId === 'DEPLOYED') return false
+    if (!task.timeline) return false
+
+    // YYYY-MM-DD from the date input is parsed as local midnight, not UTC
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(task.timeline)
+    const due = match
+      ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+      : new Date(task.timeline)
+    if (isNaN(due.getTime())) return false
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return due < startOfToday
+  }
+
   // column color helpers
   const borderForColumn = (col) => {
     if (col === 'backlog') return 'border-red-500'
@@ -170,7 +187,7 @@ export default function BoardPage() {
 
     const newTask = {
       title: taskTitle.trim(),
-      timeline: taskDate || new Date().toLocaleDateString(),
+      timeline: taskDate || '',
       columnId: taskColumn,
       assignee,
       createdAt: new Date().toISOString()
@@ -239,6 +256,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('backlog')} ${bgForColumn('backlog')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {backlog.length === 0 && <div className="text-gray-400">No tasks</div>}
@@ -256,6 +274,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('inprogress')} ${bgForColumn('inprogress')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {inprogress.length === 0 && <div className="text-gray-400">No tasks</div>}
@@ -273,6 +292,7 @@ export default function BoardPage() {
                 <div key={task.id || idx} className={`border-2 ${borderForColumn('done')} ${bgForColumn('done')} rounded-lg p-4 transition-all duration-200 hover:scale-105 hover:shadow-lg cursor-pointer`}>
                   <p className="text-white text-sm mb-3">{task.title}</p>
                   <span className="text-green-600 text-xs">{task.timeline}</span>
+                  {isOverdue(task) && <span className="ml-2 text-red-400 font-bold text-xs">OVERDUE</span>}
                 </div>
               ))}
               {done.length === 0 && <div className="text-gray-400">No tasks</div>}
