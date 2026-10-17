@@ -1,16 +1,22 @@
 import dbConnect from '@/lib/mongodb'
 import Attendance from '@/models/Attendance'
-import { getUserFromReq } from '@/lib/getUserFromReq'
+import { requireUser, requireLead, jsonError, canAccessMember } from '@/lib/authz'
 import mongoose from 'mongoose'
+
+// members only see their own attendance rows; leads see every row
+function scopeToUser(user, query) {
+  return user.role === 'lead' ? query : { ...query, member: user.id }
+}
 
 export async function POST(req) {
   try {
-    await dbConnect()
-    const { payload, error } = getUserFromReq(req)
-    if (error) return new Response(JSON.stringify({ error }), { status: 401 })
+    const { user, response } = requireLead(req, 'Only lead can mark attendance')
+    if (response) return response
 
     const body = await req.json()
     const { eventId, memberId, status, attendance } = body
+
+    await dbConnect()
 
     if (attendance && typeof attendance === 'object') {
       const results = []
@@ -18,7 +24,7 @@ export async function POST(req) {
         if (!mongoose.Types.ObjectId.isValid(mId)) continue
         const rec = await Attendance.findOneAndUpdate(
           { event: eventId, member: mId },
-          { status: s, markedBy: payload.id },
+          { status: s, markedBy: user.id },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         )
         results.push(rec)
@@ -30,7 +36,7 @@ export async function POST(req) {
 
     const rec = await Attendance.findOneAndUpdate(
       { event: eventId, member: memberId },
-      { status: status || 'present', markedBy: payload.id },
+      { status: status || 'present', markedBy: user.id },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     )
     return new Response(JSON.stringify(rec), { status: 200 })
@@ -42,22 +48,28 @@ export async function POST(req) {
 
 export async function GET(req) {
   try {
-    await dbConnect()
+    const { user, response } = requireUser(req)
+    if (response) return response
+
     const url = new URL(req.url)
     const eventId = url.searchParams.get('eventId')
     const memberId = url.searchParams.get('memberId')
 
+    if (memberId && !canAccessMember(user, memberId)) return jsonError('You can only view your own attendance', 403)
+
+    await dbConnect()
+
     if (eventId) {
-      const data = await Attendance.find({ event: eventId }).populate('member', 'name email domain').lean()
+      const data = await Attendance.find(scopeToUser(user, { event: eventId })).populate('member', 'name email domain').lean()
       return new Response(JSON.stringify(data), { status: 200 })
     }
     if (memberId) {
-      const data = await Attendance.find({ member: memberId }).populate('event', 'title date time').lean()
+      const data = await Attendance.find(scopeToUser(user, { member: memberId })).populate('event', 'title date time').lean()
       return new Response(JSON.stringify(data), { status: 200 })
     }
 
     // fallback
-    const all = await Attendance.find({}).populate('member event').lean()
+    const all = await Attendance.find(scopeToUser(user, {})).populate('member event').lean()
     return new Response(JSON.stringify(all), { status: 200 })
   } catch (err) {
     console.error(err)
