@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import MainLayout from '@/components/MainLayout'
+import LoadError from '@/components/LoadError'
 import { authFetch } from '@/lib/ClientFetch'
+import { apiErrorMessage } from '@/lib/apiError'
 export default function BoardPage() {
   // UI state
   const [openOverlay, setOpenOverlay] = useState(false)
@@ -14,6 +16,8 @@ export default function BoardPage() {
 
   // data
   const [boardTasks, setBoardTasks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   // routing / who we view
   const [viewedMemberId, setViewedMemberId] = useState(null)
@@ -66,68 +70,43 @@ export default function BoardPage() {
     }
   }, [])
 
-  useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        if (viewedMemberId) {
-          try {
-            const res = await authFetch(`/api/tasks?assignee=${encodeURIComponent(viewedMemberId)}`)
-            if (mounted && res && res.ok && Array.isArray(res.data)) {
-              setBoardTasks(res.data)
-              return
-            }
-          } catch (e) {
-            console.warn('tasks fetch by assignee failed', e)
-          }
+  const loadTasks = useCallback(async () => {
+    const memberId = viewedMemberId || loggedInMemberId
+    setLoading(true)
+    setLoadError('')
+    let failure = ''
 
-          try {
-            const raw = localStorage.getItem('boardTasks')
-            const arr = raw ? JSON.parse(raw) : []
-            const filtered = arr.filter(t => t.assignee === viewedMemberId)
-            if (mounted) setBoardTasks(filtered)
-            return
-          } catch (e) {
-            console.warn('localStorage fallback (assignee) failed', e)
-          }
+    try {
+      if (memberId) {
+        const res = await authFetch(`/api/tasks?assignee=${encodeURIComponent(memberId)}`)
+        if (res && res.ok && Array.isArray(res.data)) {
+          setBoardTasks(res.data)
+          return
         }
-        if (loggedInMemberId) {
-          try {
-            const res = await authFetch(`/api/tasks?assignee=${encodeURIComponent(loggedInMemberId)}`)
-            if (mounted && res && res.ok && Array.isArray(res.data)) {
-              setBoardTasks(res.data)
-              return
-            }
-          } catch (e) {
-            console.warn('tasks fetch for logged user failed', e)
-          }
-
-          // fallback to localStorage filtered by loggedInMemberId
-          try {
-            const raw = localStorage.getItem('boardTasks')
-            const arr = raw ? JSON.parse(raw) : []
-            const filtered = arr.filter(t => t.assignee === loggedInMemberId)
-            if (mounted) setBoardTasks(filtered)
-            return
-          } catch (e) {
-            console.warn('localStorage fallback (logged) failed', e)
-          }
-        }
-
-        try {
-          const raw = localStorage.getItem('boardTasks'); const arr = raw ? JSON.parse(raw) : []
-          if (mounted) setBoardTasks(arr)
-        } catch (e) {
-          console.warn('final localStorage fallback failed', e); if (mounted) setBoardTasks([])
-        }
-      } catch (err) {
-        console.warn('load tasks error', err)
-        if (mounted) setBoardTasks([])
+        failure = apiErrorMessage(res)
       }
-    })()
+    } catch (e) {
+      console.warn('load tasks failed', e)
+      failure = apiErrorMessage(null)
+    } finally {
+      setLoadError(failure)
+      setLoading(false)
+    }
 
-    return () => { mounted = false }
+    // show tasks saved in this browser so the board is not blank while the error is displayed
+    try {
+      const raw = localStorage.getItem('boardTasks')
+      const arr = raw ? JSON.parse(raw) : []
+      setBoardTasks(memberId ? arr.filter(t => t.assignee === memberId) : arr)
+    } catch (e) {
+      console.warn('localStorage fallback failed', e)
+      setBoardTasks([])
+    }
   }, [viewedMemberId, loggedInMemberId])
+
+  useEffect(() => {
+    loadTasks()
+  }, [loadTasks])
 
   // helpers to derive columns
   const backlog = boardTasks.filter(t => (t.columnId === 'backlog' || t.columnId === 'INITIALIZE' ))
@@ -226,6 +205,9 @@ export default function BoardPage() {
             <button onClick={() => setOpenOverlay(true)} className="bg-green-500 hover:bg-green-600 text-black font-bold py-2 px-3 sm:px-4 rounded transition-all">[ + EXECUTE NEW TASK ]</button>
           </div>
         </div>
+
+        {loadError && <LoadError message={loadError} onRetry={loadTasks} />}
+        {loading && <p className="text-sm text-gray-400 mb-4">Loading tasks...</p>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
           {/* Backlog */}

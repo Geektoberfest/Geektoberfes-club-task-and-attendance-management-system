@@ -1,9 +1,11 @@
 'use client'
 
 import MainLayout from '@/components/MainLayout'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { authFetch } from '@/lib/ClientFetch'
 import { DOMAINS } from '@/data/domains'
+import { apiErrorMessage } from '@/lib/apiError'
+import LoadError from '@/components/LoadError'
 
 function fmtDate(iso) {
   if (!iso) return ''
@@ -39,21 +41,27 @@ export default function EventsPage() {
   const [time, setTime] = useState('')
   const [venue, setVenue] = useState('')
   const [desc, setDesc] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => {
-    setRole(localStorage.getItem('userRole') || 'member')
+  const loadEvents = useCallback(async () => {
+    setLoading(true)
+    setLoadError('')
+    let failure = ''
 
-    ;(async () => {
+    try {
       // 1) Members list
       try {
         const mr = await authFetch('/api/members')
         if (mr && mr.ok && Array.isArray(mr.data) && mr.data.length) {
           setMembersList(mr.data.map(m => ({ id: String(m._id || m.id), name: m.name || m.email || 'Unknown', domain: m.domain || '' })))
         } else {
+          if (!mr?.ok) failure = apiErrorMessage(mr)
           setMembersList(DOMAINS.flatMap(d => d.members.map(m => ({ id: m.id, name: m.name, domain: d.name }))))
         }
       } catch (err) {
         console.warn('members fetch failed; using fallback DOMAINS', err)
+        failure = apiErrorMessage(null)
         setMembersList(DOMAINS.flatMap(d => d.members.map(m => ({ id: m.id, name: m.name, domain: d.name }))))
       }
 
@@ -63,6 +71,7 @@ export default function EventsPage() {
         let rawEvents = []
         if (res && res.ok && Array.isArray(res.data)) rawEvents = res.data
         else {
+          failure = apiErrorMessage(res)
           const stored = localStorage.getItem('events')
           rawEvents = stored ? JSON.parse(stored) : []
         }
@@ -108,10 +117,19 @@ export default function EventsPage() {
         setAttendanceState(state)
       } catch (err) {
         console.warn('Event load failed', err)
+        failure = apiErrorMessage(null)
         setEvents([])
       }
-    })()
+    } finally {
+      setLoadError(failure)
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    setRole(localStorage.getItem('userRole') || 'member')
+    loadEvents()
+  }, [loadEvents])
 
   const appendBoardTask = async (evt) => {
     try {
@@ -268,6 +286,9 @@ export default function EventsPage() {
             <div className="px-3 py-2 text-sm text-gray-300 rounded">Upcoming Schedule</div>
           )}
         </div>
+
+        {loadError && <LoadError message={loadError} onRetry={loadEvents} />}
+        {loading && <p className="text-sm text-gray-400 mb-4">Loading events...</p>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {events.map(ev => (
