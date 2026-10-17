@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/Header'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function SignUpPage() {
   const router = useRouter()
@@ -106,8 +107,7 @@ export default function SignUpPage() {
 
               <div>
                 <label className="block text-white mb-2 font-bold">PASSWORD</label>
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder="> enter_password..."
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
